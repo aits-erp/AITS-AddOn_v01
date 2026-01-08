@@ -1,0 +1,71 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-01 10:17:05.149077",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "additional_discounts_section",
+  "valid_from",
+  "column_break_rhvk",
+  "valid_to",
+  "column_break_ocqb",
+  "quantity_optional",
+  "column_break_pvaz",
+  "additional_discount_"
+ ],
+ "fields": [
+  {
+   "fieldname": "valid_from",
+   "fieldtype": "Date",
+   "label": "Valid From"
+  },
+  {
+   "fieldname": "valid_to",
+   "fieldtype": "Date",
+   "label": "Valid To"
+  },
+  {
+   "fieldname": "quantity_optional",
+   "fieldtype": "Float",
+   "label": "Quantity (optional)"
+  },
+  {
+   "fieldname": "additional_discount_",
+   "fieldtype": "Float",
+   "label": "Additional Discount (%)"
+  },
+  {
+   "fieldname": "column_break_rhvk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_ocqb",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_pvaz",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "additional_discounts_section",
+   "fieldtype": "Section Break",
+   "label": "Additional Discounts"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-10-01 16:48:35.609671",
+ "modified_by": "Administrator",
+ "module": "Startup App",
+ "name": "Pricing Rule Additional Discount",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
