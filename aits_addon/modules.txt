@@ -5,3 +5,4 @@ Startup App
 Custom Pro In
 Custom Update Stock
 custom_addon_ui
+Autoclose sales order

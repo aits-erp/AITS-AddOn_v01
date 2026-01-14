@@ -5,7 +5,7 @@ frappe.ui.form.on("Sales Order", {
                 __("Proforma Invoice"),
                 function () {
                     frappe.call({
-                        method: "custom_pro_in.custom_pro_in.utils.make_proforma_invoice",   // ✅ Update with correct path
+                        method: "aits_addon.custom_pro_in.utils.make_proforma_invoice",   // ✅ Update with correct path
                         args: {
                             source_name: frm.doc.name,
                         },

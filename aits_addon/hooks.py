@@ -13,15 +13,6 @@ fixtures = [
     {"doctype": "Custom Field", "filters": [
         ["dt", "in", ["Debit Note"]]
     ]},
-]
-
-# Startup App Hooks
-override_whitelisted_methods = {
-    "erpnext.stock.get_item_details.get_item_details": 
-        "aits_addon.startup_app.custom_price_rule.custom_get_item_details"
-}
-
-fixtures = [
     {   
         "doctype": "Custom Field",
         "filters": [
@@ -30,16 +21,19 @@ fixtures = [
     }
 ]
 
+# Startup App Hooks
+override_whitelisted_methods = {
+    "erpnext.stock.get_item_details.get_item_details": 
+        "aits_addon.startup_app.custom_price_rule.custom_get_item_details"
+}
+
 # Link JS to Pricing Rule
 doctype_js = {
+    "Sales Order": "public/js/sales_order.js",
     "Pricing Rule": "public/js/pricing_rule.js"
 }
 
 # Proforma Invoice Hooks
-doctype_js = {
-    "Sales Order": "public/js/sales_order.js",
-}
-
 override_whitelisted_methods = {
     "erpnext.selling.doctype.proforma_invoice.proforma_invoice.get_stock_reservation_status":
         "aits_addon.custom_pro_in.doctype.proforma_invoice.proforma_invoice.get_stock_reservation_status",
@@ -63,6 +57,18 @@ doc_events = {
 app_include_js = "/assets/aits_addon/js/global_dashboard_btn_v2.js"
 
 app_include_css = "/assets/aits_addon/css/customui.css"
+
+#Sales order autoclose
+scheduler_events = {
+    "hourly": [
+        "aits_addon.autoclose_sales_order.auto_close_sales_orders.auto_close_sales_orders"
+    ]
+}
+
+# include the patch
+patches = [
+    "aits_addon.autoclose_sales_order.add_autoclose_custom_field"
+]
 
 # Apps
 # ------------------
