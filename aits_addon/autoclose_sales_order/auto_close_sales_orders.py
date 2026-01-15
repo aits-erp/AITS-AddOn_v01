@@ -33,7 +33,7 @@ def auto_close_sales_orders(days=60):
         sales_orders = frappe.db.get_all(
             "Sales Order",
             filters={
-                "autoclose_after_60_days": 1,
+                "custom_autoclose_after_60_days": 1,
                 "docstatus": 1,
                 "status": ["not in", ["Closed", "Cancelled", "On Hold"]],
                 "transaction_date": ("<=", cutoff_date),

@@ -21,6 +21,10 @@ header.navbar .page-title a {
     visibility: visible !important;
 }
 
+header.navbar li .disabled{
+    color: rgb(255, 255, 255) !important;
+}
+
 /* Separator > */
 header.navbar .page-title .title-text span::before {
     color: rgba(255,255,255,0.75) !important;

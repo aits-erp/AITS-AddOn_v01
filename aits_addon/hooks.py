@@ -18,6 +18,12 @@ fixtures = [
         "filters": [
             ["module", "=", "Startup App"]
         ]
+    },
+    {
+        "dt": "Custom Field",
+        "filters": [
+            ["module", "=", "autoclose sales order"]
+        ]
     }
 ]
 
@@ -64,11 +70,6 @@ scheduler_events = {
         "aits_addon.autoclose_sales_order.auto_close_sales_orders.auto_close_sales_orders"
     ]
 }
-
-# include the patch
-patches = [
-    "aits_addon.autoclose_sales_order.add_autoclose_custom_field"
-]
 
 # Apps
 # ------------------
