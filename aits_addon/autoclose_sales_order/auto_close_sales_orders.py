@@ -22,7 +22,7 @@ def _has_linked_transactions(so_name):
     return False
 
 
-def auto_close_sales_orders(days=60):
+def auto_close_sales_orders(days=30):
     try:
         frappe.logger().info(f"[AutoClose] Running as user: {frappe.session.user}")
 
@@ -33,7 +33,7 @@ def auto_close_sales_orders(days=60):
         sales_orders = frappe.db.get_all(
             "Sales Order",
             filters={
-                "custom_autoclose_after_60_days": 1,
+                "custom_autoclose_after_30_days": 1,
                 "docstatus": 1,
                 "status": ["not in", ["Closed", "Cancelled", "On Hold"]],
                 "transaction_date": ("<=", cutoff_date),
@@ -119,10 +119,10 @@ def auto_close_sales_orders(days=60):
 #     return False
 
 
-# def auto_close_sales_orders(days=60):
+# def auto_close_sales_orders(days=30):
 #     """
 #     Close Sales Orders automatically if:
-#       - 'Autoclose after 60 days' is ticked
+#       - 'Autoclose after 30 days' is ticked
 #       - docstatus = 1
 #       - status not in Closed/Cancelled/On Hold
 #       - transaction_date older than (today - days)
@@ -135,7 +135,7 @@ def auto_close_sales_orders(days=60):
 #         sales_orders = frappe.db.get_all(
 #             "Sales Order",
 #             filters={
-#                 "autoclose_after_60_days": 1,
+#                 "autoclose_after_30_days": 1,
 #                 "docstatus": 1,
 #                 "status": ["not in", ["Closed", "Cancelled", "On Hold"]],
 #                 "transaction_date": ("<=", cutoff_date),
