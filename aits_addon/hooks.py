@@ -62,7 +62,7 @@ doc_events = {
 #custom_add_ui hooks
 app_include_js = "/assets/aits_addon/js/global_dashboard_btn_v2.js"
 
-app_include_css = "/assets/aits_addon/css/customui.css"
+app_include_css = "/assets/aits_addon/css/customui2.css"
 
 #Sales order autoclose
 scheduler_events = {

@@ -23,6 +23,7 @@ header.navbar .page-title a {
 
 header.navbar li .disabled{
     color: rgb(255, 255, 255) !important;
+    background-color: white !important;
 }
 
 /* Separator > */
