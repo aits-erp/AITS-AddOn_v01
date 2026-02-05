@@ -15,7 +15,7 @@ header.navbar {
 header.navbar .page-title .title-text,
 header.navbar .page-title .title-text *,
 header.navbar .page-title a {
-    color: #FFFFFF !important;        /* SAME AS HELP */
+    color: #FFFFFF !important;
     font-weight: 500 !important;
     opacity: 1 !important;
     visibility: visible !important;

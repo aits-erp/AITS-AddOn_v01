@@ -1,10 +1,8 @@
-console.log("✅ global_dashboard_btn.js loaded");
-
 // 🔐 ONLY THIS ROLE CAN SEE THE BUTTON
 const REQUIRED_ROLE = "Dashboard Manager";
 
 // ✅ YOUR LOGO PATH
-const COMPANY_LOGO = "/assets/vciplreportsv1001/images/dashboard_logo.png";
+// const COMPANY_LOGO = "/assets/vciplreportsv1001/images/dashboard_logo2.png";
 
 function userHasDashboardAccess() {
   return (
@@ -13,24 +11,24 @@ function userHasDashboardAccess() {
   );
 }
 
-function replaceNavbarLogo() {
-  const logo =
-    document.querySelector(".navbar-brand img") ||
-    document.querySelector(".app-logo img");
+// function replaceNavbarLogo() {
+//   const logo =
+//     document.querySelector(".navbar-brand img") ||
+//     document.querySelector(".app-logo img");
 
-  if (!logo) return;
+//   if (!logo) return;
 
-  logo.src = COMPANY_LOGO;
+//   logo.src = COMPANY_LOGO;
 
-  // 🔧 FIX LOOK & ALIGNMENT
-  logo.style.height = "28px";        // PERFECT NAVBAR SIZE
-  logo.style.width = "auto";
-  logo.style.maxHeight = "28px";
-  logo.style.objectFit = "contain";
-  logo.style.marginTop = "2px";
-  logo.style.padding = "0";
-  logo.style.background = "transparent";
-}
+//   // 🔧 FIX LOOK & ALIGNMENT
+//   logo.style.height = "28px";        // PERFECT NAVBAR SIZE
+//   logo.style.width = "auto";
+//   logo.style.maxHeight = "28px";
+//   logo.style.objectFit = "contain";
+//   logo.style.marginTop = "2px";
+//   logo.style.padding = "0";
+//   logo.style.background = "transparent";
+// }
 
 function renderDashboardButton() {
 
@@ -89,12 +87,12 @@ function renderDashboardButton() {
 
 // Initial render
 frappe.after_ajax(() => {
-  replaceNavbarLogo();
+  // replaceNavbarLogo();
   renderDashboardButton();
 });
 
 // Route change
 frappe.router.on("change", () => {
-  replaceNavbarLogo();
+  // replaceNavbarLogo();
   renderDashboardButton();
 });
