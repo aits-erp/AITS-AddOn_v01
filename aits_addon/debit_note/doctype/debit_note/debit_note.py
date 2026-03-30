@@ -41,7 +41,7 @@ from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
 	get_item_account_wise_additional_cost,
 	update_billed_amount_based_on_po,
 )
-
+from erpnext.accounts.doctype.purchase_invoice.purchase_invoice import PurchaseInvoice
 
 class WarehouseMissingError(frappe.ValidationError):
 	pass
@@ -49,9 +49,25 @@ class WarehouseMissingError(frappe.ValidationError):
 
 form_grid_templates = {"items": "templates/form_grid/item_grid.html"}
 
+import erpnext.controllers.sales_and_purchase_return as spr
 
-class DebitNote(BuyingController):
-	
+_original_func = spr.get_return_against_item_fields
+
+def patched_get_return_against_item_fields(voucher_type):
+    if voucher_type == "Debit Note":
+        return "purchase_invoice_item"
+    return _original_func(voucher_type)
+
+spr.get_return_against_item_fields = patched_get_return_against_item_fields
+
+class DebitNote(PurchaseInvoice):
+
+	def get_voucher_type(self):
+		return "Purchase Invoice"
+
+	def get_return_against_doctype(self):
+		return "Purchase Invoice"
+
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
 		self.status_updater = [
@@ -109,7 +125,7 @@ class DebitNote(BuyingController):
 		self.validate_credit_to_acc()
 		self.clear_unallocated_advances("Purchase Invoice Advance", "advances")
 		self.check_on_hold_or_closed_status()
-		self.validate_with_previous_doc()
+		# self.validate_with_previous_doc()
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_uom_is_integer("stock_uom", "stock_qty")
 		self.set_expense_account(for_validate=True)
@@ -216,42 +232,42 @@ class DebitNote(BuyingController):
 				check_list.append(d.purchase_order)
 				check_on_hold_or_closed_status("Purchase Order", d.purchase_order)
 
-	def validate_with_previous_doc(self):
-		super().validate_with_previous_doc(
-			{
-				"Purchase Order": {
-					"ref_dn_field": "purchase_order",
-					"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
-				},
-				"Purchase Order Item": {
-					"ref_dn_field": "po_detail",
-					"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
-					"is_child_table": True,
-					"allow_duplicate_prev_row_id": True,
-				},
-				"Purchase Receipt": {
-					"ref_dn_field": "purchase_receipt",
-					"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
-				},
-				"Purchase Receipt Item": {
-					"ref_dn_field": "pr_detail",
-					"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
-					"is_child_table": True,
-				},
-			}
-		)
+	# def validate_with_previous_doc(self):
+	# 	super().validate_with_previous_doc(
+	# 		{
+	# 			"Purchase Order": {
+	# 				"ref_dn_field": "purchase_order",
+	# 				"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
+	# 			},
+	# 			"Purchase Order Item": {
+	# 				"ref_dn_field": "po_detail",
+	# 				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
+	# 				"is_child_table": True,
+	# 				"allow_duplicate_prev_row_id": True,
+	# 			},
+	# 			"Purchase Receipt": {
+	# 				"ref_dn_field": "purchase_receipt",
+	# 				"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
+	# 			},
+	# 			"Purchase Receipt Item": {
+	# 				"ref_dn_field": "pr_detail",
+	# 				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
+	# 				"is_child_table": True,
+	# 			},
+	# 		}
+	# 	)
 
-		if (
-			cint(frappe.db.get_single_value("Buying Settings", "maintain_same_rate"))
-			and not self.is_return
-			and not self.is_internal_supplier
-		):
-			self.validate_rate_with_reference_doc(
-				[
-					["Purchase Order", "purchase_order", "po_detail"],
-					["Purchase Receipt", "purchase_receipt", "pr_detail"],
-				]
-			)
+	# 	if (
+	# 		cint(frappe.db.get_single_value("Buying Settings", "maintain_same_rate"))
+	# 		and not self.is_return
+	# 		and not self.is_internal_supplier
+	# 	):
+	# 		self.validate_rate_with_reference_doc(
+	# 			[
+	# 				["Purchase Order", "purchase_order", "po_detail"],
+	# 				["Purchase Receipt", "purchase_receipt", "pr_detail"],
+	# 			]
+	# 		)
 
 	def validate_warehouse(self, for_validate=True):
 		if self.update_stock and for_validate:
@@ -2224,3 +2240,86 @@ def make_purchase_receipt(source_name, target_doc=None):
 	)
 
 	return doc
+
+# =====================================================
+# BREAKUP TABLE CODE BELOW
+# =====================================================
+@frappe.whitelist()
+def get_debit_breakup_rows(debit_note, breakup_ref):
+    return frappe.get_all(
+        "Debit Breakup",
+        filters={
+            "debit_note": debit_note,
+            "breakup_ref": breakup_ref
+        },
+        fields="*",
+        order_by="creation asc"
+    )
+
+@frappe.whitelist()
+def save_debit_breakup_rows(debit_note, breakup_ref, rows):
+    import json
+
+    rows = json.loads(rows)
+
+    frappe.db.delete("Debit Breakup", {
+        "debit_note": debit_note,
+        "breakup_ref": breakup_ref
+    })
+
+    meta = frappe.get_meta("Debit Breakup")
+
+    for r in rows:
+        doc = frappe.new_doc("Debit Breakup")
+        doc.debit_note = debit_note
+        doc.breakup_ref = breakup_ref
+
+        for df in meta.fields:
+            fname = df.fieldname
+
+            if fname in ["debit_note", "breakup_ref"]:
+                continue
+
+            if fname in r:
+                doc.set(fname, r.get(fname))
+
+        doc.insert(ignore_permissions=True)
+
+    frappe.db.commit()
+
+    return "success"
+
+# =====================================================
+# MAKE DEBIT NOTE FROM PURCHASE INVOICE
+# =====================================================
+@frappe.whitelist()
+def make_debit_note_from_pi(source_name, target_doc=None):
+
+    def postprocess(source, target):
+        target.supplier = source.supplier
+        target.supplier_invoice_no = source.bill_no
+
+    doc = get_mapped_doc(
+        "Purchase Invoice",
+        source_name,
+        {
+            "Purchase Invoice": {
+                "doctype": "Debit Note",
+                "validation": {
+                    "docstatus": ["=", 1]
+                }
+            },
+            "Purchase Invoice Item": {
+                "doctype": "Purchase Invoice Item",  # ✅ SAME CHILD TABLE
+                "target_parentfield": "items",       # 🔥 CRITICAL FIX
+                "field_map": {
+                    "parent": "purchase_invoice",
+                    "name": "pi_detail"
+                }
+            }
+        },
+        target_doc,
+        postprocess
+    )
+
+    return doc

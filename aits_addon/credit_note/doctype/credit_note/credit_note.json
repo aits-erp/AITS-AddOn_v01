@@ -20,6 +20,7 @@
   "set_posting_time",
   "due_date",
   "inv_ref_no",
+  "valuation_rate",
   "column_break_14",
   "is_pos",
   "pos_profile",
@@ -60,6 +61,7 @@
   "total",
   "net_total",
   "taxes_section",
+  "column_break_gcue",
   "tax_category",
   "taxes_and_charges",
   "column_break_38",
@@ -732,6 +734,7 @@
   {
    "fieldname": "taxes_section",
    "fieldtype": "Section Break",
+   "hidden": 1,
    "hide_border": 1,
    "hide_days": 1,
    "hide_seconds": 1,
@@ -762,6 +765,7 @@
   {
    "fieldname": "column_break_38",
    "fieldtype": "Column Break",
+   "hidden": 1,
    "hide_days": 1,
    "hide_seconds": 1
   },
@@ -777,7 +781,8 @@
   },
   {
    "fieldname": "column_break_55",
-   "fieldtype": "Column Break"
+   "fieldtype": "Column Break",
+   "hidden": 1
   },
   {
    "fieldname": "incoterm",
@@ -794,6 +799,7 @@
   {
    "fieldname": "section_break_40",
    "fieldtype": "Section Break",
+   "hidden": 1,
    "hide_border": 1,
    "hide_days": 1,
    "hide_seconds": 1
@@ -801,6 +807,7 @@
   {
    "fieldname": "taxes",
    "fieldtype": "Table",
+   "hidden": 1,
    "hide_days": 1,
    "hide_seconds": 1,
    "label": "Taxes and Charges",
@@ -811,6 +818,7 @@
   {
    "fieldname": "section_break_43",
    "fieldtype": "Section Break",
+   "hidden": 1,
    "hide_days": 1,
    "hide_seconds": 1
   },
@@ -1066,6 +1074,7 @@
    "collapsible": 1,
    "fieldname": "sec_tax_breakup",
    "fieldtype": "Section Break",
+   "hidden": 1,
    "hide_days": 1,
    "hide_seconds": 1,
    "label": "Tax Breakup"
@@ -2193,6 +2202,16 @@
    "fieldname": "inv_ref_no",
    "fieldtype": "Data",
    "label": "Inv. Ref. No."
+  },
+  {
+   "fieldname": "valuation_rate",
+   "fieldtype": "Currency",
+   "label": "Valuation Rate"
+  },
+  {
+   "fieldname": "column_break_gcue",
+   "fieldtype": "Column Break",
+   "hidden": 1
   }
  ],
  "grid_page_length": 50,
@@ -2205,7 +2224,7 @@
    "link_fieldname": "consolidated_invoice"
   }
  ],
- "modified": "2026-01-29 15:16:38.312951",
+ "modified": "2026-03-17 14:36:32.732013",
  "modified_by": "Administrator",
  "module": "credit_note",
  "name": "Credit Note",
