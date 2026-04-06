@@ -113,20 +113,14 @@ class DebitNote(PurchaseInvoice):
 		self.validate_posting_time()
 
 		super().validate()
-		
+
 		# FIX: ensure negative qty for returns
 		for item in self.items:
 			if self.is_return and item.qty > 0:
 				item.qty = -1 * item.qty
-<<<<<<< HEAD
-
-		# Ensure GST details are properly populated
-		if not self.company_gstin:
-=======
 				
 		#changes for gst details in debit note
 		if hasattr(self, "company_gstin") and not self.company_gstin:
->>>>>>> bde7505 (gl entry fixes for non indian user, gst issue 2)
 			self.company_gstin = frappe.db.get_value("Company", self.company, "gstin")
 		self.set_gst_details()
 
