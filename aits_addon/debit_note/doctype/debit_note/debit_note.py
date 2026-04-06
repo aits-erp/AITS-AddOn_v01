@@ -100,6 +100,12 @@ class DebitNote(PurchaseInvoice):
 	def invoice_is_blocked(self):
 		return self.on_hold and (not self.release_date or self.release_date > getdate(nowdate()))
 
+	def before_validate(self):
+		super().before_validate()
+
+		self.set_import_flag()
+		self.set_tax_category_based_on_supplier()
+
 	def validate(self):
 		if not self.is_opening:
 			self.is_opening = "No"
@@ -107,6 +113,10 @@ class DebitNote(PurchaseInvoice):
 		self.validate_posting_time()
 
 		super().validate()
+		# Ensure GST details are properly populated
+		if not self.company_gstin:
+			self.company_gstin = frappe.db.get_value("Company", self.company, "gstin")
+		self.set_gst_details()
 
 		if not self.is_return:
 			self.po_required()
@@ -2086,6 +2096,25 @@ class DebitNote(PurchaseInvoice):
 		if update:
 			self.db_set("status", self.status, update_modified=update_modified)
 
+	def set_import_flag(self):
+		if self.supplier:
+			supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
+
+			if supplier_country and supplier_country != "India":
+				self.is_import = 1
+			else:
+				self.is_import = 0
+
+
+	def set_tax_category_based_on_supplier(self):
+		if self.supplier:
+			supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
+
+			if supplier_country and supplier_country != "India":
+				self.tax_category = "Import"
+			else:
+				self.tax_category = "Domestic"
+
 
 # to get details of Debit Note/receipt from which this doc was created for exchange rate difference handling
 def get_purchase_document_details(doc):
@@ -2323,3 +2352,4 @@ def make_debit_note_from_pi(source_name, target_doc=None):
     )
 
     return doc
+
