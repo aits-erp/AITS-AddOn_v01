@@ -122,8 +122,7 @@ class DebitNote(PurchaseInvoice):
 		#changes for gst details in debit note
 		if hasattr(self, "company_gstin") and not self.company_gstin:
 			self.company_gstin = frappe.db.get_value("Company", self.company, "gstin")
-		self.set_gst_details()
-
+			
 		if not self.is_return:
 			self.po_required()
 			self.pr_required()
