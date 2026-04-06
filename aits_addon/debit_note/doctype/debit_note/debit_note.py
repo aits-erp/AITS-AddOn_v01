@@ -124,6 +124,7 @@ class DebitNote(PurchaseInvoice):
 		if not self.company_gstin:
 =======
 				
+		#changes for gst details in debit note
 		if hasattr(self, "company_gstin") and not self.company_gstin:
 >>>>>>> bde7505 (gl entry fixes for non indian user, gst issue 2)
 			self.company_gstin = frappe.db.get_value("Company", self.company, "gstin")
