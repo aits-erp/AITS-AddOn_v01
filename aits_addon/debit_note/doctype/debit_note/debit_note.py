@@ -254,6 +254,43 @@ class DebitNote(PurchaseInvoice):
 				check_list.append(d.purchase_order)
 				check_on_hold_or_closed_status("Purchase Order", d.purchase_order)
 
+	# def validate_with_previous_doc(self):
+	# 	super().validate_with_previous_doc(
+	# 		{
+	# 			"Purchase Order": {
+	# 				"ref_dn_field": "purchase_order",
+	# 				"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
+	# 			},
+	# 			"Purchase Order Item": {
+	# 				"ref_dn_field": "po_detail",
+	# 				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
+	# 				"is_child_table": True,
+	# 				"allow_duplicate_prev_row_id": True,
+	# 			},
+	# 			"Purchase Receipt": {
+	# 				"ref_dn_field": "purchase_receipt",
+	# 				"compare_fields": [["supplier", "="], ["company", "="], ["currency", "="]],
+	# 			},
+	# 			"Purchase Receipt Item": {
+	# 				"ref_dn_field": "pr_detail",
+	# 				"compare_fields": [["project", "="], ["item_code", "="], ["uom", "="]],
+	# 				"is_child_table": True,
+	# 			},
+	# 		}
+	# 	)
+
+	# 	if (
+	# 		cint(frappe.db.get_single_value("Buying Settings", "maintain_same_rate"))
+	# 		and not self.is_return
+	# 		and not self.is_internal_supplier
+	# 	):
+	# 		self.validate_rate_with_reference_doc(
+	# 			[
+	# 				["Purchase Order", "purchase_order", "po_detail"],
+	# 				["Purchase Receipt", "purchase_receipt", "pr_detail"],
+	# 			]
+	# 		)
+
 	def validate_warehouse(self, for_validate=True):
 		if self.update_stock and for_validate:
 			stock_items = self.get_stock_items()
