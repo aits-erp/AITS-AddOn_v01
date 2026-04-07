@@ -94,12 +94,9 @@ class CreditNote(SellingController):
 		super().validate()
 
 		# FIX: ensure negative qty for returns
-		# Better: only normalize on first save of a return
-		if self.is_return and self.is_new():
-			for item in self.items:
-				if item.qty > 0:
-					item.qty = -1 * item.qty
-					item.stock_qty = -1 * abs(item.stock_qty)
+		for item in self.items:
+			if self.is_return and item.qty > 0:
+				item.qty = -1 * item.qty
 
 		if not self.is_pos:
 			self.so_dn_required()
