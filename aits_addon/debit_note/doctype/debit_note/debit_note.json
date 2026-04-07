@@ -320,7 +320,7 @@
    "print_hide": 1
   },
   {
-   "default": "1",
+   "default": "0",
    "fieldname": "is_return",
    "fieldtype": "Check",
    "label": "Is Return (Debit Note)",
