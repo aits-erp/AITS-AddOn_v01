@@ -2066,23 +2066,31 @@ class DebitNote(PurchaseInvoice):
 			self.db_set("status", self.status, update_modified=update_modified)
 
 	def set_import_flag(self):
-		if self.supplier:
-			supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
-
-			if supplier_country and supplier_country != "India":
-				self.is_import = 1
-			else:
-				self.is_import = 0
+		if not self.supplier:
+			return
+		supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
+		company_country = frappe.db.get_value("Company", self.company, "country")
+		if supplier_country and company_country:
+			self.is_import = 1 if supplier_country != company_country else 0
 
 
 	def set_tax_category_based_on_supplier(self):
-		if self.supplier:
-			supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
-
-			if supplier_country and supplier_country != "India":
-				self.tax_category = "Import"
-			else:
-				self.tax_category = "Domestic"
+		if not self.supplier:
+			return
+		
+		supplier_country = frappe.db.get_value("Supplier", self.supplier, "country")
+		
+		if not supplier_country:
+			return
+		
+		company_country = frappe.db.get_value("Company", self.company, "country")
+		
+		category = "Import" if supplier_country != company_country else "Domestic"
+		
+		# Only set if that Tax Category actually exists in this site
+		if frappe.db.exists("Tax Category", category):
+			self.tax_category = category
+		# else: leave whatever user has set, don't override
 
 
 # to get details of Debit Note/receipt from which this doc was created for exchange rate difference handling

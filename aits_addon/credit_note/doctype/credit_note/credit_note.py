@@ -229,6 +229,13 @@ class CreditNote(SellingController):
 		for item in self.get("items"):
 			validate_account_head(item.idx, item.income_account, self.company, "Income")
 
+	def update_against_document_in_jv(self):
+		if not getattr(self, 'supplier', None):
+			self.supplier = self.customer
+		if not getattr(self, 'credit_to', None):
+			self.credit_to = self.debit_to
+		super().update_against_document_in_jv()
+	
 	# def set_tax_withholding(self):
 	# 	if self.get("is_opening") == "Yes":
 	# 		return
