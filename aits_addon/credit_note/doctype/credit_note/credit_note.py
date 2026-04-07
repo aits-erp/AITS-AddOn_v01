@@ -94,9 +94,12 @@ class CreditNote(SellingController):
 		super().validate()
 
 		# FIX: ensure negative qty for returns
-		for item in self.items:
-			if self.is_return and item.qty > 0:
-				item.qty = -1 * item.qty
+		# Better: only normalize on first save of a return
+		if self.is_return and self.is_new():
+			for item in self.items:
+				if item.qty > 0:
+					item.qty = -1 * item.qty
+					item.stock_qty = -1 * abs(item.stock_qty)
 
 		if not self.is_pos:
 			self.so_dn_required()
@@ -161,6 +164,9 @@ class CreditNote(SellingController):
 		self.set_status()
 		if self.is_pos and not self.is_return:
 			self.verify_payment_amount_is_positive()
+		
+		if self.is_return and self.update_stock:
+			self._set_incoming_rate_for_return()
 
 		# validate amount in mode of payments for returned invoices for pos must be negative
 		if self.is_pos and self.is_return:
@@ -252,6 +258,28 @@ class CreditNote(SellingController):
 
 		gl_entries = merge_similar_entries(gl_entries)
 		return gl_entries
+
+	def _set_incoming_rate_for_return(self):
+		"""For stock returns, fetch the incoming rate from original invoice"""
+		if not self.return_against:
+			return
+		
+		for item in self.items:
+			if not item.incoming_rate and item.item_code:
+				# Try to get rate from original invoice item
+				if item.sales_invoice_item:
+					original_rate = frappe.db.get_value(
+						"Sales Invoice Item", 
+						item.sales_invoice_item, 
+						"incoming_rate"
+					)
+				else:
+					# Fall back to item valuation rate
+					original_rate = frappe.db.get_value(
+						"Item", item.item_code, "valuation_rate"
+					)
+				
+				item.incoming_rate = flt(original_rate)
 
 	# def set_tax_withholding(self):
 	# 	if self.get("is_opening") == "Yes":
@@ -392,6 +420,25 @@ class CreditNote(SellingController):
 				)
 				frappe.throw(msg, title=_("Not Allowed"))
 
+	def update_stock_ledger(self):
+		self.update_stock = 1  # ensure flag is set
+		
+		from erpnext.stock.stock_ledger import make_sl_entries
+		
+		sl_entries = []
+		for item in self.get("items"):
+			if item.item_code and item.warehouse and frappe.get_cached_value("Item", item.item_code, "is_stock_item"):
+				sle = self.get_sl_entries(item, {
+					"actual_qty": flt(item.qty),  # already negative from validate
+					"incoming_rate": flt(item.incoming_rate) if self.is_return else 0,
+				})
+				sl_entries.append(sle)
+		
+		if self.is_return:
+			make_sl_entries(sl_entries, allow_negative_stock=True)
+		else:
+			make_sl_entries(sl_entries)
+			
 	def before_cancel(self):
 		self.check_if_consolidated_invoice()
 
