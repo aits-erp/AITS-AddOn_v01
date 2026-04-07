@@ -236,6 +236,23 @@ class CreditNote(SellingController):
 			self.credit_to = self.debit_to
 		super().update_against_document_in_jv()
 	
+	def get_gl_entries(self, warehouse_account=None):
+		from erpnext.accounts.general_ledger import merge_similar_entries
+
+		gl_entries = []
+
+		self.make_customer_gl_entry(gl_entries)
+		self.make_tax_gl_entries(gl_entries)
+		self.make_item_gl_entries(gl_entries)
+		self.make_internal_transfer_gl_entries(gl_entries)
+		self.make_pos_gl_entries(gl_entries)
+		self.make_write_off_gl_entry(gl_entries)
+		self.make_gle_for_rounding_adjustment(gl_entries)
+		self.make_loyalty_point_redemption_gle(gl_entries)
+
+		gl_entries = merge_similar_entries(gl_entries)
+		return gl_entries
+
 	# def set_tax_withholding(self):
 	# 	if self.get("is_opening") == "Yes":
 	# 		return
@@ -1065,9 +1082,7 @@ class CreditNote(SellingController):
 				)
 
 		elif self.docstatus == 2 and cint(self.update_stock) and cint(auto_accounting_for_stock):
-			make_reverse_gl_entries(voucher_type=self.doctype, voucher_no=self.name)
-
-	
+			make_reverse_gl_entries(voucher_type=self.doctype, voucher_no=self.name)	
 
 	def make_customer_gl_entry(self, gl_entries):
 		# Checked both rounding_adjustment and rounded_total
@@ -1095,7 +1110,7 @@ class CreditNote(SellingController):
 			if self.is_return:
 				# Credit Note → CREDIT customer
 				debit = 0
-				credit = base_grand_total
+				credit = abs(base_grand_total)
 
 				# account currency handling
 				if self.party_account_currency == self.company_currency:
@@ -1110,7 +1125,7 @@ class CreditNote(SellingController):
 
 			else:
 				# Normal Sales Invoice → DEBIT customer
-				debit = base_grand_total
+				debit = abs(base_grand_total)
 				credit = 0
 
 				if self.party_account_currency == self.company_currency:
@@ -1244,6 +1259,114 @@ class CreditNote(SellingController):
 				)
 			)
 
+	# def make_item_gl_entries(self, gl_entries):
+	# 	# income account gl entries
+	# 	enable_discount_accounting = cint(
+	# 		frappe.db.get_single_value("Selling Settings", "enable_discount_accounting")
+	# 	)
+
+	# 	for item in self.get("items"):
+	# 		if flt(item.base_net_amount, item.precision("base_net_amount")) or item.is_fixed_asset:
+	# 			# Do not book income for transfer within same company
+	# 			if self.is_internal_transfer():
+	# 				continue
+
+	# 			if item.is_fixed_asset:
+	# 				asset = self.get_asset(item)
+
+	# 				if (self.docstatus == 2 and not self.is_return) or (
+	# 					self.docstatus == 1 and self.is_return
+	# 				):
+	# 					fixed_asset_gl_entries = get_gl_entries_on_asset_regain(
+	# 						asset,
+	# 						item.base_net_amount,
+	# 						item.finance_book,
+	# 						self.get("doctype"),
+	# 						self.get("name"),
+	# 						self.get("posting_date"),
+	# 					)
+	# 					asset.db_set("disposal_date", None)
+	# 					add_asset_activity(asset.name, _("Asset returned"))
+
+	# 					if asset.calculate_depreciation:
+	# 						posting_date = (
+	# 							frappe.db.get_value("Credit Note", self.return_against, "posting_date")
+	# 							if self.is_return
+	# 							else self.posting_date
+	# 						)
+	# 						reverse_depreciation_entry_made_after_disposal(asset, posting_date)
+	# 						notes = _(
+	# 							"This schedule was created when Asset {0} was returned through Credit Note {1}."
+	# 						).format(
+	# 							get_link_to_form(asset.doctype, asset.name),
+	# 							get_link_to_form(self.doctype, self.get("name")),
+	# 						)
+	# 						reset_depreciation_schedule(asset, self.posting_date, notes)
+	# 						asset.reload()
+
+	# 				else:
+	# 					if asset.calculate_depreciation:
+	# 						if not asset.status == "Fully Depreciated":
+	# 							notes = _(
+	# 								"This schedule was created when Asset {0} was sold through Credit Note {1}."
+	# 							).format(
+	# 								get_link_to_form(asset.doctype, asset.name),
+	# 								get_link_to_form(self.doctype, self.get("name")),
+	# 							)
+	# 							depreciate_asset(asset, self.posting_date, notes)
+	# 							asset.reload()
+
+	# 					fixed_asset_gl_entries = get_gl_entries_on_asset_disposal(
+	# 						asset,
+	# 						item.base_net_amount,
+	# 						item.finance_book,
+	# 						self.get("doctype"),
+	# 						self.get("name"),
+	# 						self.get("posting_date"),
+	# 					)
+	# 					asset.db_set("disposal_date", self.posting_date)
+	# 					add_asset_activity(asset.name, _("Asset sold"))
+
+	# 				for gle in fixed_asset_gl_entries:
+	# 					gle["against"] = self.customer
+	# 					gl_entries.append(self.get_gl_dict(gle, item=item))
+
+	# 				self.set_asset_status(asset)
+
+	# 			else:
+	# 				income_account = (
+	# 					item.income_account
+	# 					if (not item.enable_deferred_revenue or self.is_return)
+	# 					else item.deferred_revenue_account
+	# 				)
+
+	# 				amount, base_amount = self.get_amount_and_base_amount(item, enable_discount_accounting)
+
+	# 				account_currency = get_account_currency(income_account)
+	# 				gl_entries.append(
+	# 					self.get_gl_dict(
+	# 						{
+	# 							"account": income_account,
+	# 							"against": self.customer,
+	# 							"credit": flt(base_amount, item.precision("base_net_amount")),
+	# 							"credit_in_account_currency": (
+	# 								flt(base_amount, item.precision("base_net_amount"))
+	# 								if account_currency == self.company_currency
+	# 								else flt(amount, item.precision("net_amount"))
+	# 							),
+	# 							"credit_in_transaction_currency": flt(amount, item.precision("net_amount")),
+	# 							"cost_center": item.cost_center,
+	# 							"project": item.project or self.project,
+	# 						},
+	# 						account_currency,
+	# 						item=item,
+	# 					)
+	# 				)
+
+	# 	# expense account gl entries
+	# 	if cint(self.update_stock) and erpnext.is_perpetual_inventory_enabled(self.company):
+	# 		gl_entries += super().get_gl_entries()
+
 	def make_item_gl_entries(self, gl_entries):
 		# income account gl entries
 		enable_discount_accounting = cint(
@@ -1252,11 +1375,13 @@ class CreditNote(SellingController):
 
 		for item in self.get("items"):
 			if flt(item.base_net_amount, item.precision("base_net_amount")) or item.is_fixed_asset:
+
 				# Do not book income for transfer within same company
 				if self.is_internal_transfer():
 					continue
 
 				if item.is_fixed_asset:
+					# 🔹 KEEP YOUR EXISTING ASSET LOGIC (UNCHANGED)
 					asset = self.get_asset(item)
 
 					if (self.docstatus == 2 and not self.is_return) or (
@@ -1280,12 +1405,14 @@ class CreditNote(SellingController):
 								else self.posting_date
 							)
 							reverse_depreciation_entry_made_after_disposal(asset, posting_date)
+
 							notes = _(
 								"This schedule was created when Asset {0} was returned through Credit Note {1}."
 							).format(
 								get_link_to_form(asset.doctype, asset.name),
 								get_link_to_form(self.doctype, self.get("name")),
 							)
+
 							reset_depreciation_schedule(asset, self.posting_date, notes)
 							asset.reload()
 
@@ -1319,27 +1446,69 @@ class CreditNote(SellingController):
 					self.set_asset_status(asset)
 
 				else:
+					# 🔹 NORMAL ITEM LOGIC (FIXED)
+
 					income_account = (
 						item.income_account
 						if (not item.enable_deferred_revenue or self.is_return)
 						else item.deferred_revenue_account
 					)
 
-					amount, base_amount = self.get_amount_and_base_amount(item, enable_discount_accounting)
+					amount, base_amount = self.get_amount_and_base_amount(
+						item, enable_discount_accounting
+					)
 
 					account_currency = get_account_currency(income_account)
+
+					# ---------------------------
+					# 🔥 SIGN CORRECTION
+					# ---------------------------
+					if self.is_return:
+						# Credit Note → DEBIT income account
+						debit = abs(base_amount)
+						credit = 0
+
+						if account_currency == self.company_currency:
+							debit_acc = base_amount
+							credit_acc = 0
+						else:
+							debit_acc = amount
+							credit_acc = 0
+
+						debit_tr = amount
+						credit_tr = 0
+
+					else:
+						# Sales Invoice → CREDIT income account
+						debit = 0
+						credit = abs(base_amount)
+
+						if account_currency == self.company_currency:
+							debit_acc = 0
+							credit_acc = base_amount
+						else:
+							debit_acc = 0
+							credit_acc = amount
+
+						debit_tr = 0
+						credit_tr = amount
+					# ---------------------------
+
 					gl_entries.append(
 						self.get_gl_dict(
 							{
 								"account": income_account,
 								"against": self.customer,
-								"credit": flt(base_amount, item.precision("base_net_amount")),
-								"credit_in_account_currency": (
-									flt(base_amount, item.precision("base_net_amount"))
-									if account_currency == self.company_currency
-									else flt(amount, item.precision("net_amount"))
-								),
-								"credit_in_transaction_currency": flt(amount, item.precision("net_amount")),
+
+								"debit": debit,
+								"credit": credit,
+
+								"debit_in_account_currency": debit_acc,
+								"credit_in_account_currency": credit_acc,
+
+								"debit_in_transaction_currency": debit_tr,
+								"credit_in_transaction_currency": credit_tr,
+
 								"cost_center": item.cost_center,
 								"project": item.project or self.project,
 							},
@@ -1351,7 +1520,7 @@ class CreditNote(SellingController):
 		# expense account gl entries
 		if cint(self.update_stock) and erpnext.is_perpetual_inventory_enabled(self.company):
 			gl_entries += super().get_gl_entries()
-
+			
 	def get_asset(self, item):
 		if item.get("asset"):
 			asset = frappe.get_doc("Asset", item.asset)
