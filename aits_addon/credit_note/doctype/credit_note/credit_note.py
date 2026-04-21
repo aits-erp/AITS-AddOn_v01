@@ -35,7 +35,7 @@ from erpnext.assets.doctype.asset.depreciation import (
 	reverse_depreciation_entry_made_after_disposal,
 )
 from erpnext.assets.doctype.asset_activity.asset_activity import add_asset_activity
-from erpnext.controllers.accounts_controller import validate_account_head, get_round_off_account_and_cost_center
+from erpnext.controllers.accounts_controller import validate_account_head
 from erpnext.controllers.selling_controller import SellingController
 from erpnext.projects.doctype.timesheet.timesheet import get_projectwise_timesheet_data
 from erpnext.setup.doctype.company.company import update_company_current_month_sales
@@ -1230,19 +1230,19 @@ class CreditNote(SellingController):
 			# 🔥 Correcting TAX GL for Credit Note
 			# --------------------------
 			if self.is_return:
-				# Credit Note → tax must be DEBIT
-				debit = flt(base_amount, tax.precision("tax_amount_after_discount_amount"))
+				# Credit Note → tax must be DEBIT (amounts are negative from calculation, use abs())
+				debit = abs(flt(base_amount, tax.precision("tax_amount_after_discount_amount")))
 				credit = 0
 
 				debit_acc = (
-					flt(base_amount, tax.precision("base_tax_amount_after_discount_amount"))
+					abs(flt(base_amount, tax.precision("base_tax_amount_after_discount_amount")))
 					if account_currency == self.company_currency
-					else flt(amount, tax.precision("tax_amount_after_discount_amount"))
+					else abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				)
 
 				credit_acc = 0
 
-				debit_tr = flt(amount, tax.precision("tax_amount_after_discount_amount"))
+				debit_tr = abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				credit_tr = 0
 
 			else:
