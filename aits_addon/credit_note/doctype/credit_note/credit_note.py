@@ -1279,6 +1279,7 @@ class CreditNote(SellingController):
 						"credit_in_transaction_currency": credit_tr,
 
 						"cost_center": tax.cost_center,
+						"company_gstin": self.company_tax_id,
 					},
 					account_currency,
 					item=tax,
