@@ -1235,14 +1235,14 @@ class CreditNote(SellingController):
 				credit = 0
 
 				debit_acc = (
-					abs(base_amount, tax.precision("base_tax_amount_after_discount_amount"))
+					abs(flt(base_amount, tax.precision("base_tax_amount_after_discount_amount")))
 					if account_currency == self.company_currency
-					else flt(amount, tax.precision("tax_amount_after_discount_amount"))
+					else abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				)
 
 				credit_acc = 0
 
-				debit_tr = abs(amount, tax.precision("tax_amount_after_discount_amount"))
+				debit_tr = abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				credit_tr = 0
 
 			else:
