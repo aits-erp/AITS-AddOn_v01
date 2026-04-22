@@ -1231,18 +1231,18 @@ class CreditNote(SellingController):
 			# --------------------------
 			if self.is_return:
 				# Credit Note → tax must be DEBIT
-				debit = flt(base_amount, tax.precision("tax_amount_after_discount_amount"))
+				debit = abs(flt(base_amount, tax.precision("tax_amount_after_discount_amount")))
 				credit = 0
 
 				debit_acc = (
-					flt(base_amount, tax.precision("base_tax_amount_after_discount_amount"))
+					abs(base_amount, tax.precision("base_tax_amount_after_discount_amount"))
 					if account_currency == self.company_currency
 					else flt(amount, tax.precision("tax_amount_after_discount_amount"))
 				)
 
 				credit_acc = 0
 
-				debit_tr = flt(amount, tax.precision("tax_amount_after_discount_amount"))
+				debit_tr = abs(amount, tax.precision("tax_amount_after_discount_amount"))
 				credit_tr = 0
 
 			else:
