@@ -50,14 +50,14 @@ override_doctype_class = {
 }
 
 # update stock hooks
-doc_events = {
-    "Sales Invoice": {
-        "before_validate": "aits_addon.custom_update_stock.sales.before_validate"
-    },
-    "Purchase Invoice": {
-        "before_validate": "aits_addon.custom_update_stock.purchase.before_validate"
-    }
-}
+# doc_events = {
+#     "Sales Invoice": {
+#         "before_validate": "aits_addon.custom_update_stock.sales.before_validate"
+#     },
+#     "Purchase Invoice": {
+#         "before_validate": "aits_addon.custom_update_stock.purchase.before_validate"
+#     }
+# }
 
 #custom_add_ui hooks
 app_include_js = "/assets/aits_addon/js/global_dashboard_btn_v2.js"
