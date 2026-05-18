@@ -1,71 +1,71 @@
-# import frappe
+import frappe
 
-# def before_validate(doc, method=None):
-#     """
-#     PURCHASE INVOICE RULE (FINAL)
+def before_validate(doc, method=None):
+    """
+    PURCHASE INVOICE RULE (FINAL)
 
-#     Apply ONLY when Purchase Invoice is created DIRECTLY.
+    Apply ONLY when Purchase Invoice is created DIRECTLY.
 
-#     If:
-#     - PI is NOT created from Purchase Receipt or Purchase Order
-#     - At least one item MAINTAINS STOCK (Item.is_stock_item = 1)
-#     - AND NO Purchase Receipt exists against this PI
+    If:
+    - PI is NOT created from Purchase Receipt or Purchase Order
+    - At least one item MAINTAINS STOCK (Item.is_stock_item = 1)
+    - AND NO Purchase Receipt exists against this PI
 
-#     Then:
-#     - Automatically check Update Stock
-#     """
+    Then:
+    - Automatically check Update Stock
+    """
 
-#     # --------------------------------------------------
-#     # 0. SKIP if PI is created from PR or PO
-#     # --------------------------------------------------
-#     for row in doc.items:
-#         if row.purchase_receipt or row.purchase_order:
-#             return  # standard ERPNext flow, do nothing
+    # --------------------------------------------------
+    # 0. SKIP if PI is created from PR or PO
+    # --------------------------------------------------
+    for row in doc.items:
+        if row.purchase_receipt or row.purchase_order:
+            return  # standard ERPNext flow, do nothing
 
-#     # --------------------------------------------------
-#     # 1. Detect stock-maintained items (Item master)
-#     # --------------------------------------------------
-#     has_stock_item = False
-#     item_cache = {}
+    # --------------------------------------------------
+    # 1. Detect stock-maintained items (Item master)
+    # --------------------------------------------------
+    has_stock_item = False
+    item_cache = {}
 
-#     for row in doc.items:
-#         if not row.item_code:
-#             continue
+    for row in doc.items:
+        if not row.item_code:
+            continue
 
-#         if row.item_code not in item_cache:
-#             item_cache[row.item_code] = frappe.db.get_value(
-#                 "Item",
-#                 row.item_code,
-#                 "is_stock_item"
-#             )
+        if row.item_code not in item_cache:
+            item_cache[row.item_code] = frappe.db.get_value(
+                "Item",
+                row.item_code,
+                "is_stock_item"
+            )
 
-#         if item_cache[row.item_code]:
-#             has_stock_item = True
-#             break
+        if item_cache[row.item_code]:
+            has_stock_item = True
+            break
 
-#     if not has_stock_item:
-#         return
+    if not has_stock_item:
+        return
 
-#     # --------------------------------------------------
-#     # 2. Check if Purchase Receipt already exists
-#     # --------------------------------------------------
-#     pr_exists = False
+    # --------------------------------------------------
+    # 2. Check if Purchase Receipt already exists
+    # --------------------------------------------------
+    pr_exists = False
 
-#     if frappe.db.exists(
-#         "Purchase Receipt Item",
-#         {"against_purchase_invoice": doc.name}
-#     ):
-#         pr_exists = True
+    if frappe.db.exists(
+        "Purchase Receipt Item",
+        {"against_purchase_invoice": doc.name}
+    ):
+        pr_exists = True
 
-#     if not pr_exists and frappe.db.exists(
-#         "Purchase Receipt Item",
-#         {"prevdoc_docname": doc.name}
-#     ):
-#         pr_exists = True
+    if not pr_exists and frappe.db.exists(
+        "Purchase Receipt Item",
+        {"prevdoc_docname": doc.name}
+    ):
+        pr_exists = True
 
-#     # --------------------------------------------------
-#     # 3. Apply rule ONLY for direct PI
-#     # --------------------------------------------------
-#     if not pr_exists:
-#         doc.update_stock = 1
+    # --------------------------------------------------
+    # 3. Apply rule ONLY for direct PI
+    # --------------------------------------------------
+    if not pr_exists:
+        doc.update_stock = 1
 

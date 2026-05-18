@@ -781,7 +781,6 @@ frappe.ui.form.on("Credit Note", {
 				},
 			};
 		};
-
 	},
 	onload: function (frm) {
 		frm.redemption_conversion_factor = null;
@@ -1075,12 +1074,6 @@ frappe.ui.form.on("Credit Note", {
 
 		if (frm.doc.is_debit_note) {
 			frm.set_df_property("return_against", "label", __("Adjustment Against"));
-		}
-	},
-
-	is_return: function(frm) {
-		if (frm.doc.is_return) {
-			frm.set_value("update_stock", 1);
 		}
 	},
 });

@@ -1,71 +1,71 @@
-# import frappe
+import frappe
 
 
-# def before_validate(doc, method=None):
-#     """
-#     SALES INVOICE RULE (FINAL)
+def before_validate(doc, method=None):
+    """
+    SALES INVOICE RULE (FINAL)
 
-#     Apply ONLY when Sales Invoice is created DIRECTLY.
+    Apply ONLY when Sales Invoice is created DIRECTLY.
 
-#     If:
-#     - SI is NOT created from Delivery Note or Sales Order
-#     - At least one item MAINTAINS STOCK (Item.is_stock_item = 1)
-#     - AND NO Delivery Note exists against this SI
+    If:
+    - SI is NOT created from Delivery Note or Sales Order
+    - At least one item MAINTAINS STOCK (Item.is_stock_item = 1)
+    - AND NO Delivery Note exists against this SI
 
-#     Then:
-#     - Automatically check Update Stock
-#     """
+    Then:
+    - Automatically check Update Stock
+    """
 
-#     # --------------------------------------------------
-#     # 0. SKIP if SI is created from DN or SO
-#     # --------------------------------------------------
-#     for row in doc.items:
-#         if row.delivery_note or row.sales_order:
-#             return  # standard ERPNext flow, do nothing
+    # --------------------------------------------------
+    # 0. SKIP if SI is created from DN or SO
+    # --------------------------------------------------
+    for row in doc.items:
+        if row.delivery_note or row.sales_order:
+            return  # standard ERPNext flow, do nothing
 
-#     # --------------------------------------------------
-#     # 1. Detect stock-maintained items (Item master)
-#     # --------------------------------------------------
-#     has_stock_item = False
-#     item_cache = {}
+    # --------------------------------------------------
+    # 1. Detect stock-maintained items (Item master)
+    # --------------------------------------------------
+    has_stock_item = False
+    item_cache = {}
 
-#     for row in doc.items:
-#         if not row.item_code:
-#             continue
+    for row in doc.items:
+        if not row.item_code:
+            continue
 
-#         if row.item_code not in item_cache:
-#             item_cache[row.item_code] = frappe.db.get_value(
-#                 "Item",
-#                 row.item_code,
-#                 "is_stock_item"
-#             )
+        if row.item_code not in item_cache:
+            item_cache[row.item_code] = frappe.db.get_value(
+                "Item",
+                row.item_code,
+                "is_stock_item"
+            )
 
-#         if item_cache[row.item_code]:
-#             has_stock_item = True
-#             break
+        if item_cache[row.item_code]:
+            has_stock_item = True
+            break
 
-#     if not has_stock_item:
-#         return
+    if not has_stock_item:
+        return
 
-#     # --------------------------------------------------
-#     # 2. Check if Delivery Note already exists
-#     # --------------------------------------------------
-#     dn_exists = False
+    # --------------------------------------------------
+    # 2. Check if Delivery Note already exists
+    # --------------------------------------------------
+    dn_exists = False
 
-#     if frappe.db.exists(
-#         "Delivery Note Item",
-#         {"against_sales_invoice": doc.name}
-#     ):
-#         dn_exists = True
+    if frappe.db.exists(
+        "Delivery Note Item",
+        {"against_sales_invoice": doc.name}
+    ):
+        dn_exists = True
 
-#     if not dn_exists and frappe.db.exists(
-#         "Delivery Note Item",
-#         {"prevdoc_docname": doc.name}
-#     ):
-#         dn_exists = True
+    if not dn_exists and frappe.db.exists(
+        "Delivery Note Item",
+        {"prevdoc_docname": doc.name}
+    ):
+        dn_exists = True
 
-#     # --------------------------------------------------
-#     # 3. Apply rule ONLY for direct SI
-#     # --------------------------------------------------
-#     if not dn_exists:
-#         doc.update_stock = 1
+    # --------------------------------------------------
+    # 3. Apply rule ONLY for direct SI
+    # --------------------------------------------------
+    if not dn_exists:
+        doc.update_stock = 1
