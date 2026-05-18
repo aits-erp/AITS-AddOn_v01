@@ -1,4 +1,4 @@
-frappe.ui.form.on("Sales Invoice", {
+frappe.ui.form.on("Purchase Invoice", {
 	is_return: function(frm) {
 
 		if (frm.doc.is_return) {

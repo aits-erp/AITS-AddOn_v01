@@ -37,6 +37,7 @@ override_whitelisted_methods = {
 doctype_js = {
     "Sales Order": "public/js/sales_order.js",
     "Sales Invoice": "public/js/sales_invoice.js",
+    "Purchase Invoice": "public/js/purchase_invoice.js",
     "Pricing Rule": "public/js/pricing_rule.js"
 }
 
