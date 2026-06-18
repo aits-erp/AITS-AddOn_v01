@@ -35,7 +35,7 @@ from erpnext.assets.doctype.asset.depreciation import (
 	reverse_depreciation_entry_made_after_disposal,
 )
 from erpnext.assets.doctype.asset_activity.asset_activity import add_asset_activity
-from erpnext.controllers.accounts_controller import validate_account_head
+from erpnext.controllers.accounts_controller import validate_account_head, get_round_off_account_and_cost_center
 from erpnext.controllers.selling_controller import SellingController
 from erpnext.projects.doctype.timesheet.timesheet import get_projectwise_timesheet_data
 from erpnext.setup.doctype.company.company import update_company_current_month_sales
@@ -65,6 +65,10 @@ class CreditNote(SellingController):
 			}
 		]
 
+	@property
+	def voucher_type(self):
+		return "Sales Invoice"
+		
 	def set_indicator(self):
 		"""Set indicator for portal"""
 		if self.outstanding_amount < 0:
@@ -88,6 +92,11 @@ class CreditNote(SellingController):
 		self.is_selling = True
 		self._normalize_tax_rows()
 		super().validate()
+
+		# FIX: ensure negative qty for returns
+		for item in self.items:
+			if self.is_return and item.qty > 0:
+				item.qty = -1 * item.qty
 
 		if not self.is_pos:
 			self.so_dn_required()
@@ -152,6 +161,9 @@ class CreditNote(SellingController):
 		self.set_status()
 		if self.is_pos and not self.is_return:
 			self.verify_payment_amount_is_positive()
+		
+		if self.is_return and self.update_stock:
+			self._set_incoming_rate_for_return()
 
 		# validate amount in mode of payments for returned invoices for pos must be negative
 		if self.is_pos and self.is_return:
@@ -219,6 +231,52 @@ class CreditNote(SellingController):
 	def validate_income_account(self):
 		for item in self.get("items"):
 			validate_account_head(item.idx, item.income_account, self.company, "Income")
+
+	def update_against_document_in_jv(self):
+		if not getattr(self, 'supplier', None):
+			self.supplier = self.customer
+		if not getattr(self, 'credit_to', None):
+			self.credit_to = self.debit_to
+		super().update_against_document_in_jv()
+	
+	def get_gl_entries(self, warehouse_account=None):
+		from erpnext.accounts.general_ledger import merge_similar_entries
+
+		gl_entries = []
+
+		self.make_customer_gl_entry(gl_entries)
+		self.make_tax_gl_entries(gl_entries)
+		self.make_item_gl_entries(gl_entries)
+		self.make_internal_transfer_gl_entries(gl_entries)
+		self.make_pos_gl_entries(gl_entries)
+		self.make_write_off_gl_entry(gl_entries)
+		self.make_gle_for_rounding_adjustment(gl_entries)
+		self.make_loyalty_point_redemption_gle(gl_entries)
+
+		gl_entries = merge_similar_entries(gl_entries)
+		return gl_entries
+
+	def _set_incoming_rate_for_return(self):
+		"""For stock returns, fetch the incoming rate from original invoice"""
+		if not self.return_against:
+			return
+		
+		for item in self.items:
+			if not item.incoming_rate and item.item_code:
+				# Try to get rate from original invoice item
+				if item.sales_invoice_item:
+					original_rate = frappe.db.get_value(
+						"Sales Invoice Item", 
+						item.sales_invoice_item, 
+						"incoming_rate"
+					)
+				else:
+					# Fall back to item valuation rate
+					original_rate = frappe.db.get_value(
+						"Item", item.item_code, "valuation_rate"
+					)
+				
+				item.incoming_rate = flt(original_rate)
 
 	# def set_tax_withholding(self):
 	# 	if self.get("is_opening") == "Yes":
@@ -359,6 +417,25 @@ class CreditNote(SellingController):
 				)
 				frappe.throw(msg, title=_("Not Allowed"))
 
+	def update_stock_ledger(self):
+		self.update_stock = 1  # ensure flag is set
+		
+		from erpnext.stock.stock_ledger import make_sl_entries
+		
+		sl_entries = []
+		for item in self.get("items"):
+			if item.item_code and item.warehouse and frappe.get_cached_value("Item", item.item_code, "is_stock_item"):
+				sle = self.get_sl_entries(item, {
+					"actual_qty": flt(item.qty),  # already negative from validate
+					"incoming_rate": flt(item.incoming_rate) if self.is_return else 0,
+				})
+				sl_entries.append(sle)
+		
+		if self.is_return:
+			make_sl_entries(sl_entries, allow_negative_stock=True)
+		else:
+			make_sl_entries(sl_entries)
+			
 	def before_cancel(self):
 		self.check_if_consolidated_invoice()
 
@@ -445,7 +522,7 @@ class CreditNote(SellingController):
 					"second_source_field": "qty",
 					"second_join_field": "so_detail",
 					"overflow_type": "delivery",
-					"extra_cond": """ and exists(select name from `tabSales Invoice`
+					"extra_cond": """ and exists(select name from `tabCredit Note`
 					where name=`tabSales Invoice Item`.parent and update_stock = 1)""",
 				}
 			)
@@ -461,7 +538,7 @@ class CreditNote(SellingController):
 						"second_source_dt": "Delivery Note Item",
 						"second_source_field": "-1 * qty",
 						"second_join_field": "so_detail",
-						"extra_cond": """ and exists (select name from `tabSales Invoice` where name=`tabSales Invoice Item`.parent and update_stock=1 and is_return=1)""",
+						"extra_cond": """ and exists (select name from `tabCredit Note` where name=`tabSales Invoice Item`.parent and update_stock=1 and is_return=1)""",
 					}
 				)
 
@@ -1049,489 +1126,7 @@ class CreditNote(SellingController):
 				)
 
 		elif self.docstatus == 2 and cint(self.update_stock) and cint(auto_accounting_for_stock):
-			make_reverse_gl_entries(voucher_type=self.doctype, voucher_no=self.name)
-
-	# def get_gl_entries(self):
-	# 	"""
-	# 	Robust, ERPNext v15-compatible GL entry builder for Credit Note.
-
-	# 	- Works with Document rows or dict rows for items/taxes.
-	# 	- Computes totals from base_amount or qty * base_rate fallback.
-	# 	- Adds India Compliance GST fields on tax GL entries.
-	# 	- Ensures required GL metadata (company, posting_date, voucher_type, voucher_no, fiscal_year).
-	# 	- Returns list of frappe._dict objects ready for make_gl_entries.
-	# 	"""
-	# 	import frappe
-	# 	from frappe.utils import flt, nowdate
-
-	# 	def get_val(row, field, default=None):
-	# 		"""Return attribute-like value from Document or dict safely."""
-	# 		if row is None:
-	# 			return default
-	# 		# Document (has attribute)
-	# 		try:
-	# 			# If it's a Document, getattr will work
-	# 			val = getattr(row, field)
-	# 			# Document returns AttributeError if not present
-	# 			return val if val is not None else default
-	# 		except Exception:
-	# 			pass
-	# 		# fallback to dict-style
-	# 		try:
-	# 			if isinstance(row, dict):
-	# 				return row.get(field, default)
-	# 		except Exception:
-	# 			pass
-	# 		return default
-
-	# 	gl_entries = []
-
-	# 	# Helper: Resolve tax amount safely (base first, fallback to tax_amount)
-	# 	def get_tax_amount(tax_row):
-	# 		amt = flt(get_val(tax_row, "base_tax_amount", 0))
-	# 		if flt(amt) == 0:
-	# 			amt = flt(get_val(tax_row, "tax_amount", 0))
-	# 		return flt(amt)
-
-	# 	# ------------------------------------------
-	# 	# 1) ITEM REVERSAL (DEBIT Sales / Income Account)
-	# 	# ------------------------------------------
-	# 	total_item_amount = flt(0.0)
-	# 	for item in getattr(self, "items", []) or []:
-	# 		base_amount = flt(get_val(item, "base_amount", 0))
-	# 		if not base_amount:
-	# 			qty = flt(get_val(item, "qty", 0))
-	# 			base_rate = flt(get_val(item, "base_rate", get_val(item, "rate", 0)))
-	# 			base_amount = qty * base_rate
-	# 		total_item_amount += base_amount
-
-	# 	if total_item_amount:
-	# 		# Determine income account (prefer item-level income_account)
-	# 		income_account = None
-	# 		if getattr(self, "items", None):
-	# 			first_item = self.items[0]
-	# 			income_account = get_val(first_item, "income_account", None)
-
-	# 		if not income_account:
-	# 			# fallback: Company default income account (ERPNext standard field)
-	# 			income_account = frappe.db.get_value("Company", self.company, "default_income_account")
-
-	# 		if not income_account:
-	# 			# last resort: try to use against_income_account on document (if exists)
-	# 			income_account = get_val(self, "against_income_account", None)
-
-	# 		if not income_account:
-	# 			frappe.throw(_("No Income Account found for Credit Note {0}").format(self.name))
-
-	# 		cost_center_for_items = None
-	# 		if getattr(self, "items", None) and get_val(self.items[0], "cost_center", None):
-	# 			cost_center_for_items = get_val(self.items[0], "cost_center", None)
-	# 		elif get_val(self, "cost_center", None):
-	# 			cost_center_for_items = get_val(self, "cost_center", None)
-
-	# 		gl_entries.append({
-	# 			"account": income_account,
-	# 			"debit": flt(total_item_amount),
-	# 			"credit": 0.0,
-	# 			"party_type": None,
-	# 			"party": None,
-	# 			"against_voucher_type": getattr(self, "return_against_doctype", None) or get_val(self, "return_against_doctype", None),
-	# 			"against_voucher": getattr(self, "return_against", None) or get_val(self, "return_against", None),
-	# 			"remarks": _("Sales Reversal for Credit Note {0}").format(self.name),
-	# 			"cost_center": cost_center_for_items,
-	# 			"project": get_val(self, "project", None),
-	# 		})
-
-	# 	# ------------------------------------------
-	# 	# 2) TAX REVERSAL (DEBIT Tax Accounts)
-	# 	# ------------------------------------------
-	# 	total_tax_amount = flt(0.0)
-	# 	for tax in getattr(self, "taxes", []) or []:
-	# 		amt = get_tax_amount(tax)
-	# 		if abs(amt) == 0:
-	# 			continue
-
-	# 		total_tax_amount += amt
-	# 		tax_account = get_val(tax, "account_head", None) or get_val(tax, "account", None)
-	# 		if not tax_account:
-	# 			# skip tax row if account missing (or throw depending on preference)
-	# 			frappe.throw(_("Tax row {0} is missing account head").format(get_val(tax, "description", get_val(tax, "charge_type", "Tax"))))
-
-	# 		# Prepare GST fields required by india_compliance (safe retrieval)
-	# 		company_gstin_val = get_val(self, "company_gstin") or frappe.db.get_value("Company", self.company, "gstin")
-	# 		place_of_supply_val = get_val(self, "place_of_supply")
-	# 		billing_address_gstin_val = get_val(self, "billing_address_gstin")
-	# 		gst_category_val = get_val(self, "gst_category")
-	# 		reverse_charge_val = get_val(self, "reverse_charge", 0)
-	# 		invoice_type_val = get_val(self, "invoice_type")
-
-	# 		gl_entries.append({
-	# 			"account": tax_account,
-	# 			"debit": flt(amt),
-	# 			"credit": 0.0,
-	# 			"remarks": _("Tax Reversal ({0}) for Credit Note {1}").format(
-	# 				get_val(tax, "description", get_val(tax, "charge_type", None)), self.name
-	# 			),
-	# 			"cost_center": get_val(tax, "cost_center", None),
-
-	# 			# GST metadata for india_compliance
-	# 			"company_gstin": company_gstin_val,
-	# 			"place_of_supply": place_of_supply_val,
-	# 			"billing_address_gstin": billing_address_gstin_val,
-	# 			"gst_category": gst_category_val,
-	# 			"reverse_charge": reverse_charge_val,
-	# 			"invoice_type": invoice_type_val,
-	# 		})
-
-	# 	# ------------------------------------------
-	# 	# 3) ROUND-OFF ADJUSTMENT
-	# 	# ------------------------------------------
-	# 	expected_total = flt(total_item_amount) + flt(total_tax_amount)
-	# 	actual_total = flt(get_val(self, "base_rounded_total") or get_val(self, "base_grand_total") or get_val(self, "grand_total") or 0)
-	# 	round_difference = flt(expected_total - actual_total)
-
-	# 	if abs(round_difference) > 0.0001:
-	# 		round_off_account = get_val(self, "round_off_account") or frappe.db.get_value("Company", self.company, "round_off_account")
-	# 		if not round_off_account:
-	# 			round_off_account = frappe.db.get_value("Account", {"account_name": "Round Off", "company": self.company}, "name")
-
-	# 		if not round_off_account:
-	# 			frappe.throw(_("Round Off Account is required but not found in Company."))
-
-	# 		if round_difference > 0:
-	# 			gl_entries.append({
-	# 				"account": round_off_account,
-	# 				"debit": flt(round_difference),
-	# 				"credit": 0.0,
-	# 				"remarks": _("Round Off Adjustment (Debit) for {0}").format(self.name),
-	# 			})
-	# 		else:
-	# 			gl_entries.append({
-	# 				"account": round_off_account,
-	# 				"debit": 0.0,
-	# 				"credit": flt(abs(round_difference)),
-	# 				"remarks": _("Round Off Adjustment (Credit) for {0}").format(self.name),
-	# 			})
-
-	# 	# ------------------------------------------
-	# 	# 4) CUSTOMER COUNTER ENTRY (CREDIT Grand Total)
-	# 	# ------------------------------------------
-	# 	grand_total = flt(get_val(self, "base_rounded_total") or get_val(self, "base_grand_total") or get_val(self, "grand_total") or 0)
-
-	# 	customer_account = get_val(self, "debit_to") \
-	# 		or frappe.db.get_value("Party Account", {"party": self.customer, "party_type": "Customer", "company": self.company}, "default_account") \
-	# 		or frappe.db.get_value("Company", self.company, "default_receivable_account")
-
-	# 	if not customer_account:
-	# 		frappe.throw(_("Customer Receivable Account is required."))
-
-	# 	gl_entries.append({
-	# 		"account": customer_account,
-	# 		"debit": 0.0,
-	# 		"credit": flt(grand_total),
-	# 		"party_type": "Customer",
-	# 		"party": self.customer,
-	# 		"remarks": _("Customer Credit for Credit Note {0}").format(self.name),
-	# 	})
-
-	# 	# ------------------------------------------
-	# 	# Ensure required ERPNext GL fields are present on each entry
-	# 	# and convert to frappe._dict (object-like) which ERPNext expects
-	# 	# ------------------------------------------
-	# 	fiscal_year = frappe.defaults.get_global_default("fiscal_year")
-	# 	posting_date = get_val(self, "posting_date") or nowdate()
-
-	# 	normalized = []
-	# 	for e in gl_entries:
-	# 		# ensure mandatory fields exist
-	# 		e.setdefault("company", self.company)
-	# 		e.setdefault("posting_date", posting_date)
-	# 		e.setdefault("voucher_type", self.doctype)
-	# 		e.setdefault("voucher_no", self.name)
-	# 		e.setdefault("fiscal_year", fiscal_year)
-
-	# 		# account currency (optional)
-	# 		try:
-	# 			e.setdefault("account_currency", frappe.db.get_value("Account", e.get("account"), "account_currency"))
-	# 		except Exception:
-	# 			e.setdefault("account_currency", None)
-
-	# 		# party fields safe
-	# 		e.setdefault("party_type", e.get("party_type"))
-	# 		e.setdefault("party", e.get("party"))
-
-	# 		# convert numeric fields to proper floats
-	# 		e["debit"] = flt(e.get("debit", 0.0))
-	# 		e["credit"] = flt(e.get("credit", 0.0))
-
-	# 		# final check: ensure account is present
-	# 		if not e.get("account"):
-	# 			frappe.throw(_("GL Entry generated without account: {0}").format(frappe.as_json(e)))
-
-	# 		normalized.append(frappe._dict(e))
-
-	# 	# DEBUG LOG (inspect in Error Log)
-	# 	frappe.log_error(frappe.as_json(normalized), "GL_ENTRIES_GENERATED_FOR_CREDIT_NOTE_{0}".format(self.name))
-
-	# 	return normalized
-
-	def get_gl_entries(self):
-		"""
-		Robust GL entry builder for Credit Note (production-safe).
-
-		- Works with Document rows or dict rows for items/taxes.
-		- Computes totals from base_amount or qty * base_rate fallback.
-		- Adds India Compliance GST metadata on every GL row (tax and non-tax) to avoid
-		india_compliance overrides zeroing out values.
-		- Ensures required GL metadata (company, posting_date, voucher_type, voucher_no, fiscal_year).
-		- Returns list of frappe._dict objects ready for make_gl_entries.
-		"""
-		import frappe
-		from frappe.utils import flt, nowdate
-
-		def get_val(row, field, default=None):
-			"""Return attribute-like value from Document or dict safely."""
-			if row is None:
-				return default
-			# Prefer getattr for Document-like objects
-			try:
-				val = getattr(row, field)
-				# If getattr exists but returns None, fall back to default
-				return val if val is not None else default
-			except Exception:
-				# fallback to dict access
-				try:
-					if isinstance(row, dict):
-						return row.get(field, default)
-				except Exception:
-					pass
-			return default
-
-		# collect doc-level GST metadata (safe lookups)
-		# company_gstin_doc = get_val(self, "company_gstin") or frappe.db.get_value("Company", self.company, "gstin")
-		company_gstin_doc = get_company_gstin_safe(self.company)
-		place_of_supply_doc = get_val(self, "place_of_supply")
-		billing_address_gstin_doc = get_val(self, "billing_address_gstin")
-		shipping_address_gstin_doc = get_val(self, "shipping_address_gstin")
-		gst_category_doc = get_val(self, "gst_category")
-		reverse_charge_doc = get_val(self, "reverse_charge", 0)
-		invoice_type_doc = get_val(self, "invoice_type")
-		is_export_doc = get_val(self, "is_export", 0)
-		is_nil_rated_doc = get_val(self, "is_nil_rated", 0)
-		is_exempt_doc = get_val(self, "is_exempt", 0)
-		is_composition_doc = get_val(self, "is_composition", 0)
-		is_sez_doc = get_val(self, "is_sez", 0)
-		igst_on_intra_doc = get_val(self, "igst_on_intra", 0)
-
-		gl_entries = []
-
-		# Helper: Resolve tax amount safely (base first, fallback to tax_amount)
-		def get_tax_amount(tax_row):
-			amt = flt(get_val(tax_row, "base_tax_amount", 0))
-			if flt(amt) == 0:
-				amt = flt(get_val(tax_row, "tax_amount", 0))
-			return flt(amt)
-
-		# --------------------------
-		# 1) ITEM REVERSAL (DEBIT Sales / Income Account)
-		# --------------------------
-		total_item_amount = flt(0.0)
-		for item in getattr(self, "items", []) or []:
-			base_amount = flt(get_val(item, "base_amount", 0))
-			if not base_amount:
-				qty = flt(get_val(item, "qty", 0))
-				base_rate = flt(get_val(item, "base_rate", get_val(item, "rate", 0)))
-				base_amount = qty * base_rate
-			total_item_amount += base_amount
-
-		if total_item_amount:
-			# Determine income account (prefer item-level income_account)
-			income_account = None
-			if getattr(self, "items", None):
-				first_item = self.items[0]
-				income_account = get_val(first_item, "income_account", None)
-
-			if not income_account:
-				income_account = frappe.db.get_value("Company", self.company, "default_income_account")
-
-			# last resort
-			if not income_account:
-				income_account = get_val(self, "against_income_account", None)
-
-			if not income_account:
-				frappe.throw(_("No Income Account found for Credit Note {0}").format(self.name))
-
-			cost_center_for_items = None
-			if getattr(self, "items", None) and get_val(self.items[0], "cost_center", None):
-				cost_center_for_items = get_val(self.items[0], "cost_center", None)
-			elif get_val(self, "cost_center", None):
-				cost_center_for_items = get_val(self, "cost_center", None)
-
-			gl_entries.append({
-				"account": income_account,
-				"debit": flt(total_item_amount),
-				"credit": 0.0,
-				"party_type": None,
-				"party": None,
-				"against_voucher_type": get_val(self, "return_against_doctype", None),
-				"against_voucher": get_val(self, "return_against", None),
-				"remarks": _("Sales Reversal for Credit Note {0}").format(self.name),
-				"cost_center": cost_center_for_items,
-				"project": get_val(self, "project", None),
-			})
-
-		# --------------------------
-		# 2) TAX REVERSAL (DEBIT Tax Accounts)
-		# --------------------------
-		total_tax_amount = flt(0.0)
-		for tax in getattr(self, "taxes", []) or []:
-			amt = get_tax_amount(tax)
-			if abs(amt) == 0:
-				continue
-
-			total_tax_amount += amt
-			tax_account = get_val(tax, "account_head", None) or get_val(tax, "account", None)
-			if not tax_account:
-				frappe.throw(_("Tax row {0} is missing account head").format(
-					get_val(tax, "description", get_val(tax, "charge_type", "Tax"))
-				))
-
-			# tax-level cost center (if present)
-			tax_cost_center = get_val(tax, "cost_center", None)
-
-			# Attach GST metadata (safe)
-			gl_entries.append({
-				"account": tax_account,
-				"debit": flt(amt),
-				"credit": 0.0,
-				"remarks": _("Tax Reversal ({0}) for Credit Note {1}").format(
-					get_val(tax, "description", get_val(tax, "charge_type", None)), self.name
-				),
-				"cost_center": tax_cost_center,
-
-				# GST metadata (india_compliance)
-				"company_gstin": company_gstin_doc,
-				"place_of_supply": place_of_supply_doc,
-				"billing_address_gstin": billing_address_gstin_doc,
-				"shipping_address_gstin": shipping_address_gstin_doc,
-				"gst_category": gst_category_doc,
-				"reverse_charge": reverse_charge_doc,
-				"invoice_type": invoice_type_doc,
-				"is_export": is_export_doc,
-				"is_nil_rated": is_nil_rated_doc,
-				"is_exempt": is_exempt_doc,
-				"is_composition": is_composition_doc,
-				"is_sez": is_sez_doc,
-				"igst_on_intra": igst_on_intra_doc,
-			})
-
-		# --------------------------
-		# 3) ROUND-OFF ADJUSTMENT
-		# --------------------------
-		expected_total = flt(total_item_amount) + flt(total_tax_amount)
-		actual_total = flt(get_val(self, "base_rounded_total") or get_val(self, "base_grand_total") or get_val(self, "grand_total") or 0)
-		round_difference = flt(expected_total - actual_total)
-
-		if abs(round_difference) > 0.0001:
-			round_off_account = get_val(self, "round_off_account") or frappe.db.get_value("Company", self.company, "round_off_account")
-			if not round_off_account:
-				round_off_account = frappe.db.get_value("Account", {"account_name": "Round Off", "company": self.company}, "name")
-
-			if not round_off_account:
-				frappe.throw(_("Round Off Account is required but not found in Company."))
-
-			if round_difference > 0:
-				gl_entries.append({
-					"account": round_off_account,
-					"debit": flt(round_difference),
-					"credit": 0.0,
-					"remarks": _("Round Off Adjustment (Debit) for {0}").format(self.name),
-				})
-			else:
-				gl_entries.append({
-					"account": round_off_account,
-					"debit": 0.0,
-					"credit": flt(abs(round_difference)),
-					"remarks": _("Round Off Adjustment (Credit) for {0}").format(self.name),
-				})
-
-		# --------------------------
-		# 4) CUSTOMER COUNTER ENTRY (CREDIT Grand Total)
-		# --------------------------
-		grand_total = flt(get_val(self, "base_rounded_total") or get_val(self, "base_grand_total") or get_val(self, "grand_total") or 0)
-
-		customer_account = get_val(self, "debit_to") \
-			or frappe.db.get_value("Party Account", {"party": self.customer, "party_type": "Customer", "company": self.company}, "default_account") \
-			or frappe.db.get_value("Company", self.company, "default_receivable_account")
-
-		if not customer_account:
-			frappe.throw(_("Customer Receivable Account is required."))
-
-		gl_entries.append({
-			"account": customer_account,
-			"debit": 0.0,
-			"credit": flt(grand_total),
-			"party_type": "Customer",
-			"party": self.customer,
-			"remarks": _("Customer Credit for Credit Note {0}").format(self.name),
-		})
-
-		# --------------------------
-		# Normalize and attach GST metadata onto every row, then convert to frappe._dict
-		# --------------------------
-		fiscal_year = frappe.defaults.get_global_default("fiscal_year")
-		posting_date = get_val(self, "posting_date") or nowdate()
-
-		normalized = []
-		for e in gl_entries:
-			# Ensure mandatory fields exist
-			e.setdefault("company", self.company)
-			e.setdefault("posting_date", posting_date)
-			e.setdefault("voucher_type", self.doctype)
-			e.setdefault("voucher_no", self.name)
-			e.setdefault("fiscal_year", fiscal_year)
-
-			# Ensure India compliance GST metadata exists on every row (safe defaults)
-			e.setdefault("company_gstin", company_gstin_doc)
-			e.setdefault("place_of_supply", place_of_supply_doc)
-			e.setdefault("billing_address_gstin", billing_address_gstin_doc)
-			e.setdefault("shipping_address_gstin", shipping_address_gstin_doc)
-			e.setdefault("gst_category", gst_category_doc)
-			e.setdefault("reverse_charge", reverse_charge_doc)
-			e.setdefault("invoice_type", invoice_type_doc)
-			e.setdefault("is_export", is_export_doc)
-			e.setdefault("is_nil_rated", is_nil_rated_doc)
-			e.setdefault("is_exempt", is_exempt_doc)
-			e.setdefault("is_composition", is_composition_doc)
-			e.setdefault("is_sez", is_sez_doc)
-			e.setdefault("igst_on_intra", igst_on_intra_doc)
-
-			# account currency (optional)
-			try:
-				e.setdefault("account_currency", frappe.db.get_value("Account", e.get("account"), "account_currency"))
-			except Exception:
-				e.setdefault("account_currency", None)
-
-			# party fields safe
-			e.setdefault("party_type", e.get("party_type"))
-			e.setdefault("party", e.get("party"))
-
-			# convert numeric fields to proper floats
-			e["debit"] = flt(e.get("debit", 0.0))
-			e["credit"] = flt(e.get("credit", 0.0))
-
-			# final check: ensure account is present
-			if not e.get("account"):
-				frappe.throw(_("GL Entry generated without account: {0}").format(frappe.as_json(e)))
-
-			normalized.append(frappe._dict(e))
-
-		# DEBUG LOG (inspect in Error Log)
-		frappe.log_error(frappe.as_json(normalized), "GL_ENTRIES_GENERATED_FOR_CREDIT_NOTE_{0}".format(self.name))
-
-		return normalized
-
-
+			make_reverse_gl_entries(voucher_type=self.doctype, voucher_no=self.name)	
 
 	def make_customer_gl_entry(self, gl_entries):
 		# Checked both rounding_adjustment and rounded_total
@@ -1559,7 +1154,7 @@ class CreditNote(SellingController):
 			if self.is_return:
 				# Credit Note → CREDIT customer
 				debit = 0
-				credit = base_grand_total
+				credit = abs(base_grand_total)
 
 				# account currency handling
 				if self.party_account_currency == self.company_currency:
@@ -1574,7 +1169,7 @@ class CreditNote(SellingController):
 
 			else:
 				# Normal Sales Invoice → DEBIT customer
-				debit = base_grand_total
+				debit = abs(base_grand_total)
 				credit = 0
 
 				if self.party_account_currency == self.company_currency:
@@ -1636,18 +1231,18 @@ class CreditNote(SellingController):
 			# --------------------------
 			if self.is_return:
 				# Credit Note → tax must be DEBIT
-				debit = flt(base_amount, tax.precision("tax_amount_after_discount_amount"))
+				debit = abs(flt(base_amount, tax.precision("tax_amount_after_discount_amount")))
 				credit = 0
 
 				debit_acc = (
-					flt(base_amount, tax.precision("base_tax_amount_after_discount_amount"))
+					abs(flt(base_amount, tax.precision("base_tax_amount_after_discount_amount")))
 					if account_currency == self.company_currency
-					else flt(amount, tax.precision("tax_amount_after_discount_amount"))
+					else abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				)
 
 				credit_acc = 0
 
-				debit_tr = flt(amount, tax.precision("tax_amount_after_discount_amount"))
+				debit_tr = abs(flt(amount, tax.precision("tax_amount_after_discount_amount")))
 				credit_tr = 0
 
 			else:
@@ -1684,6 +1279,7 @@ class CreditNote(SellingController):
 						"credit_in_transaction_currency": credit_tr,
 
 						"cost_center": tax.cost_center,
+						"company_gstin": self.company_tax_id,
 					},
 					account_currency,
 					item=tax,
@@ -1708,6 +1304,114 @@ class CreditNote(SellingController):
 				)
 			)
 
+	# def make_item_gl_entries(self, gl_entries):
+	# 	# income account gl entries
+	# 	enable_discount_accounting = cint(
+	# 		frappe.db.get_single_value("Selling Settings", "enable_discount_accounting")
+	# 	)
+
+	# 	for item in self.get("items"):
+	# 		if flt(item.base_net_amount, item.precision("base_net_amount")) or item.is_fixed_asset:
+	# 			# Do not book income for transfer within same company
+	# 			if self.is_internal_transfer():
+	# 				continue
+
+	# 			if item.is_fixed_asset:
+	# 				asset = self.get_asset(item)
+
+	# 				if (self.docstatus == 2 and not self.is_return) or (
+	# 					self.docstatus == 1 and self.is_return
+	# 				):
+	# 					fixed_asset_gl_entries = get_gl_entries_on_asset_regain(
+	# 						asset,
+	# 						item.base_net_amount,
+	# 						item.finance_book,
+	# 						self.get("doctype"),
+	# 						self.get("name"),
+	# 						self.get("posting_date"),
+	# 					)
+	# 					asset.db_set("disposal_date", None)
+	# 					add_asset_activity(asset.name, _("Asset returned"))
+
+	# 					if asset.calculate_depreciation:
+	# 						posting_date = (
+	# 							frappe.db.get_value("Credit Note", self.return_against, "posting_date")
+	# 							if self.is_return
+	# 							else self.posting_date
+	# 						)
+	# 						reverse_depreciation_entry_made_after_disposal(asset, posting_date)
+	# 						notes = _(
+	# 							"This schedule was created when Asset {0} was returned through Credit Note {1}."
+	# 						).format(
+	# 							get_link_to_form(asset.doctype, asset.name),
+	# 							get_link_to_form(self.doctype, self.get("name")),
+	# 						)
+	# 						reset_depreciation_schedule(asset, self.posting_date, notes)
+	# 						asset.reload()
+
+	# 				else:
+	# 					if asset.calculate_depreciation:
+	# 						if not asset.status == "Fully Depreciated":
+	# 							notes = _(
+	# 								"This schedule was created when Asset {0} was sold through Credit Note {1}."
+	# 							).format(
+	# 								get_link_to_form(asset.doctype, asset.name),
+	# 								get_link_to_form(self.doctype, self.get("name")),
+	# 							)
+	# 							depreciate_asset(asset, self.posting_date, notes)
+	# 							asset.reload()
+
+	# 					fixed_asset_gl_entries = get_gl_entries_on_asset_disposal(
+	# 						asset,
+	# 						item.base_net_amount,
+	# 						item.finance_book,
+	# 						self.get("doctype"),
+	# 						self.get("name"),
+	# 						self.get("posting_date"),
+	# 					)
+	# 					asset.db_set("disposal_date", self.posting_date)
+	# 					add_asset_activity(asset.name, _("Asset sold"))
+
+	# 				for gle in fixed_asset_gl_entries:
+	# 					gle["against"] = self.customer
+	# 					gl_entries.append(self.get_gl_dict(gle, item=item))
+
+	# 				self.set_asset_status(asset)
+
+	# 			else:
+	# 				income_account = (
+	# 					item.income_account
+	# 					if (not item.enable_deferred_revenue or self.is_return)
+	# 					else item.deferred_revenue_account
+	# 				)
+
+	# 				amount, base_amount = self.get_amount_and_base_amount(item, enable_discount_accounting)
+
+	# 				account_currency = get_account_currency(income_account)
+	# 				gl_entries.append(
+	# 					self.get_gl_dict(
+	# 						{
+	# 							"account": income_account,
+	# 							"against": self.customer,
+	# 							"credit": flt(base_amount, item.precision("base_net_amount")),
+	# 							"credit_in_account_currency": (
+	# 								flt(base_amount, item.precision("base_net_amount"))
+	# 								if account_currency == self.company_currency
+	# 								else flt(amount, item.precision("net_amount"))
+	# 							),
+	# 							"credit_in_transaction_currency": flt(amount, item.precision("net_amount")),
+	# 							"cost_center": item.cost_center,
+	# 							"project": item.project or self.project,
+	# 						},
+	# 						account_currency,
+	# 						item=item,
+	# 					)
+	# 				)
+
+	# 	# expense account gl entries
+	# 	if cint(self.update_stock) and erpnext.is_perpetual_inventory_enabled(self.company):
+	# 		gl_entries += super().get_gl_entries()
+
 	def make_item_gl_entries(self, gl_entries):
 		# income account gl entries
 		enable_discount_accounting = cint(
@@ -1716,11 +1420,13 @@ class CreditNote(SellingController):
 
 		for item in self.get("items"):
 			if flt(item.base_net_amount, item.precision("base_net_amount")) or item.is_fixed_asset:
+
 				# Do not book income for transfer within same company
 				if self.is_internal_transfer():
 					continue
 
 				if item.is_fixed_asset:
+					# 🔹 KEEP YOUR EXISTING ASSET LOGIC (UNCHANGED)
 					asset = self.get_asset(item)
 
 					if (self.docstatus == 2 and not self.is_return) or (
@@ -1744,12 +1450,14 @@ class CreditNote(SellingController):
 								else self.posting_date
 							)
 							reverse_depreciation_entry_made_after_disposal(asset, posting_date)
+
 							notes = _(
 								"This schedule was created when Asset {0} was returned through Credit Note {1}."
 							).format(
 								get_link_to_form(asset.doctype, asset.name),
 								get_link_to_form(self.doctype, self.get("name")),
 							)
+
 							reset_depreciation_schedule(asset, self.posting_date, notes)
 							asset.reload()
 
@@ -1783,27 +1491,69 @@ class CreditNote(SellingController):
 					self.set_asset_status(asset)
 
 				else:
+					# 🔹 NORMAL ITEM LOGIC (FIXED)
+
 					income_account = (
 						item.income_account
 						if (not item.enable_deferred_revenue or self.is_return)
 						else item.deferred_revenue_account
 					)
 
-					amount, base_amount = self.get_amount_and_base_amount(item, enable_discount_accounting)
+					amount, base_amount = self.get_amount_and_base_amount(
+						item, enable_discount_accounting
+					)
 
 					account_currency = get_account_currency(income_account)
+
+					# ---------------------------
+					# 🔥 SIGN CORRECTION
+					# ---------------------------
+					if self.is_return:
+						# Credit Note → DEBIT income account
+						debit = abs(base_amount)
+						credit = 0
+
+						if account_currency == self.company_currency:
+							debit_acc = base_amount
+							credit_acc = 0
+						else:
+							debit_acc = amount
+							credit_acc = 0
+
+						debit_tr = amount
+						credit_tr = 0
+
+					else:
+						# Sales Invoice → CREDIT income account
+						debit = 0
+						credit = abs(base_amount)
+
+						if account_currency == self.company_currency:
+							debit_acc = 0
+							credit_acc = base_amount
+						else:
+							debit_acc = 0
+							credit_acc = amount
+
+						debit_tr = 0
+						credit_tr = amount
+					# ---------------------------
+
 					gl_entries.append(
 						self.get_gl_dict(
 							{
 								"account": income_account,
 								"against": self.customer,
-								"credit": flt(base_amount, item.precision("base_net_amount")),
-								"credit_in_account_currency": (
-									flt(base_amount, item.precision("base_net_amount"))
-									if account_currency == self.company_currency
-									else flt(amount, item.precision("net_amount"))
-								),
-								"credit_in_transaction_currency": flt(amount, item.precision("net_amount")),
+
+								"debit": debit,
+								"credit": credit,
+
+								"debit_in_account_currency": debit_acc,
+								"credit_in_account_currency": credit_acc,
+
+								"debit_in_transaction_currency": debit_tr,
+								"credit_in_transaction_currency": credit_tr,
+
 								"cost_center": item.cost_center,
 								"project": item.project or self.project,
 							},
@@ -1815,7 +1565,7 @@ class CreditNote(SellingController):
 		# expense account gl entries
 		if cint(self.update_stock) and erpnext.is_perpetual_inventory_enabled(self.company):
 			gl_entries += super().get_gl_entries()
-
+			
 	def get_asset(self, item):
 		if item.get("asset"):
 			asset = frappe.get_doc("Asset", item.asset)
@@ -3205,40 +2955,27 @@ def check_if_return_invoice_linked_with_payment_entry(self):
 
 
 def get_company_gstin_safe(company):
-    """
-    Universal GSTIN resolver for ERPNext.
-    Works with:
-    - Non-GST sites (Company.tax_id)
-    - GST sites (Address.gstin)
-    - India Compliance enabled/disabled
-    """
 
-    # 1️⃣ Try Company.tax_id (non-GST / legacy setups)
+    # 1️⃣ Try Company.tax_id
     if frappe.db.has_column("Company", "tax_id"):
         gstin = frappe.db.get_value("Company", company, "tax_id")
         if gstin:
             return gstin
 
-    # 2️⃣ Try Address.gstin (GST / India Compliance)
+    # 2️⃣ Try Address.gstin properly via Dynamic Link
     if frappe.db.has_column("Address", "gstin"):
-        gstin = frappe.db.get_value(
-            "Address",
+
+        address = frappe.db.get_value(
+            "Dynamic Link",
             {
-                "is_your_company_address": 1,
                 "link_doctype": "Company",
-                "link_name": company
+                "link_name": company,
+                "parenttype": "Address"
             },
-            "gstin"
-        )
-        if gstin:
-            return gstin
-
-        # fallback to any linked address
-        return frappe.db.get_value(
-            "Address",
-            {"link_doctype": "Company", "link_name": company},
-            "gstin"
+            "parent"
         )
 
-    # 3️⃣ No GST configured
+        if address:
+            return frappe.db.get_value("Address", address, "gstin")
+
     return None
